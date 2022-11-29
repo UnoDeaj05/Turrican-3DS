@@ -1,7 +1,5 @@
-// Simple citro2d sprite drawing example
-// Images borrowed from:
-//   https://kenney.nl/assets/space-shooter-redux
 #include <citro2d.h>
+#include <opusfile.h>
 #include <3ds.h>
 
 #include <assert.h>
@@ -10,58 +8,54 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "intro.h"
+#include "titleScreen.h"
+
 #define MAX_SPRITES   768
 #define SCREEN_WIDTH  400
 #define SCREEN_HEIGHT 240
 
-// Simple sprite struct
+// Sprite struct
 typedef struct
 {
 	C2D_Sprite spr;
 } Sprite;
 
+// Sprite definitions
 static C2D_SpriteSheet spriteSheet;
 static Sprite sprites[MAX_SPRITES];
 static size_t numSprites = 1;
 
-//---------------------------------------------------------------------------------
-static void initSprites() {
-//---------------------------------------------------------------------------------
-	Sprite* introSprite = &sprites[0];
+// Sound definitions
+static const int SAMPLE_RATE = 48000; // Opus is fixed at 48kHz
+static const int SAMPLES_PER_BUF = SAMPLE_RATE * 120 / 1000; // 120ms buffer
+static const int CHANNELS_PER_SAMPLE = 2;
+static const int THREAD_AFFINITY = -1;           // Execute thread on any core
+static const int THREAD_STACK_SZ = 32 * 1024;    // 32kB stack for audio thread
+static const size_t WAVEBUF_SIZE = SAMPLES_PER_BUF * CHANNELS_PER_SAMPLE * sizeof(int16_t); // Size of NDSP wavebufs
 
-	// Set intro image, centre and position
-	C2D_SpriteFromSheet(&introSprite->spr, spriteSheet, 0);
-	C2D_SpriteSetCenter(&introSprite->spr, 0.0f, 0.0f);
-	C2D_SpriteSetPos(&introSprite->spr, 52, 0);
+// Intro definitions
+int fade = 255;
+bool introFlag = true;
+
+//---------------------------------------------------------------------------------
+static void initSprites(int begin, int end) {
+//---------------------------------------------------------------------------------
+	for(int i = begin; i <= end; i++) {
+		Sprite* sprite = &sprites[i];
+
+		// Set intro image, centre and position
+		C2D_SpriteFromSheet(&sprite->spr, spriteSheet, i);
+		C2D_SpriteSetCenter(&sprite->spr, 0.0f, 0.0f);
+		C2D_SpriteSetPos(&sprite->spr, 52, 0);
+	}
 }
 
-static int intro(int fade, u32 kDown, bool introFlag) {
-	/*int mstime = 15000;
-	clock_t start_time = clock();
-			int i = 0;
-
-	while(clock() > mstime) {
-		if (kDown & KEY_UP) {
-			i++;
-			printf("\x1b[9;1H%d", i);}
-			//break;
-	}*/
-
-	C2D_Fade(C2D_Color32(0, 0, 0, fade)); //255 blank, 0 visible
-	C2D_DrawSprite(&sprites[0].spr);
-
-	//Decrement fade counter
-	if((fade > 0) && (introFlag == true)) {
-		fade--;
-	}
-
-	if((fade < 255) && (introFlag == false)) {
-		fade++;
-	}
-
-	printf("\x1b[8;1H%d", fade);
-
-	return fade;
+void debug() {
+	printf("\x1b[1;1HSprites: %zu/%u\x1b[K", numSprites, MAX_SPRITES);
+	printf("\x1b[2;1HCPU:     %6.2f%%\x1b[K", C3D_GetProcessingTime()*6.0f);
+	printf("\x1b[3;1HGPU:     %6.2f%%\x1b[K", C3D_GetDrawingTime()*6.0f);
+	printf("\x1b[4;1HCmdBuf:  %6.2f%%\x1b[K", C3D_GetCmdBufUsage()*100.0f);
 }
 
 //---------------------------------------------------------------------------------
@@ -82,11 +76,8 @@ int main(int argc, char* argv[]) {
 	spriteSheet = C2D_SpriteSheetLoad("romfs:/gfx/sprites.t3x");
 	if (!spriteSheet) svcBreak(USERBREAK_PANIC);
 
-	// Initialize sprites
-	initSprites();
-
-	int fade = 255;
-	bool introFlag = true;
+	// Initialize intro sprites
+	initSprites(0, 1);
 
 	// Main loop
 	while (aptMainLoop())
@@ -95,22 +86,21 @@ int main(int argc, char* argv[]) {
 
 		// Respond to user input
 		u32 kDown = hidKeysDown();
-		
-		// Image shown for 15 seconds, with about half a second transition time, audio is played first then image is shown.
+		u32 kHeld = hidKeysHeld();
 
-		printf("\x1b[1;1HSprites: %zu/%u\x1b[K", numSprites, MAX_SPRITES);
-		printf("\x1b[2;1HCPU:     %6.2f%%\x1b[K", C3D_GetProcessingTime()*6.0f);
-		printf("\x1b[3;1HGPU:     %6.2f%%\x1b[K", C3D_GetDrawingTime()*6.0f);
-		printf("\x1b[4;1HCmdBuf:  %6.2f%%\x1b[K", C3D_GetCmdBufUsage()*100.0f);
-		
+		debug();
 
 		// Render the scene
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 		C2D_TargetClear(top, C2D_Color32f(0.0f, 0.0f, 0.0f, 1.0f));
 		C2D_SceneBegin(top);
-		fade = intro(fade, kDown, introFlag);
+		fade = intro(fade, kDown, introFlag, &sprites[0]);
 		if((kDown & KEY_A) && (fade == 0)) {
 			introFlag = false;
+		}
+		if((introFlag == false) && (fade == 255)) {
+			C2D_Fade(C2D_Color32(0, 0, 0, 0));
+			C2D_DrawSprite(&sprites[1]);
 		}
 
 		C3D_FrameEnd(0);
